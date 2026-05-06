@@ -7,5 +7,11 @@ func All() []rocco.Endpoint {
 	return []rocco.Endpoint{
 		CreateTranslation,
 		GetTranslationsByHash,
+		BatchTranslate,
+		ListTenantTranslations,
+		GetTenantTranslationsByHash,
+		UpdateTranslation,
+		DeleteTranslation,
+		GetCoverage,
 	}
 }

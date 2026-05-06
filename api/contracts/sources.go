@@ -13,4 +13,6 @@ type Sources interface {
 	Get(ctx context.Context, hash string) (*models.Source, error)
 	// Set stores a source record, inserting or updating by hash.
 	Set(ctx context.Context, hash string, source *models.Source) error
+	// ListByTenant retrieves all sources for a tenant with pagination.
+	ListByTenant(ctx context.Context, tenantID string, limit, offset int) ([]*models.Source, int, error)
 }

@@ -24,7 +24,7 @@ func TestSourceAndTranslationToResponse(t *testing.T) {
 		Status:     "completed",
 	}
 
-	resp := SourceAndTranslationToResponse(source, translation, models.RouteSimple)
+	resp := SourceAndTranslationToResponse(source, translation)
 
 	if resp.Hash != source.Hash {
 		t.Errorf("Hash: got %q, want %q", resp.Hash, source.Hash)
@@ -40,9 +40,6 @@ func TestSourceAndTranslationToResponse(t *testing.T) {
 	}
 	if resp.TargetLang != translation.TargetLang {
 		t.Errorf("TargetLang: got %q, want %q", resp.TargetLang, translation.TargetLang)
-	}
-	if resp.Classification != string(models.RouteSimple) {
-		t.Errorf("Classification: got %q, want %q", resp.Classification, string(models.RouteSimple))
 	}
 	if resp.Provider != translation.Provider {
 		t.Errorf("Provider: got %q, want %q", resp.Provider, translation.Provider)

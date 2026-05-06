@@ -8,9 +8,6 @@ import (
 	"time"
 
 	"github.com/zoobz-io/cicero/api/contracts"
-	"github.com/zoobz-io/cicero/internal/classify"
-	"github.com/zoobz-io/cicero/internal/translate"
-	"github.com/zoobz-io/pipz"
 	"github.com/zoobz-io/sum"
 )
 
@@ -46,14 +43,4 @@ func WithTranslations(tr contracts.Translations) RegistryOption {
 // WithTranslator registers a contracts.Translator implementation.
 func WithTranslator(t contracts.Translator) RegistryOption {
 	return func(k sum.Key) { sum.Register[contracts.Translator](k, t) }
-}
-
-// WithClassifier registers a classify.Classifier implementation.
-func WithClassifier(c classify.Classifier) RegistryOption {
-	return func(k sum.Key) { sum.Register[classify.Classifier](k, c) }
-}
-
-// WithPipeline registers a pipz.Chainable[*translate.Job] implementation.
-func WithPipeline(p pipz.Chainable[*translate.Job]) RegistryOption {
-	return func(k sum.Key) { sum.Register[pipz.Chainable[*translate.Job]](k, p) }
 }

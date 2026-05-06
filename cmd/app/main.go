@@ -10,10 +10,12 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/redis/go-redis/v9"
 	"github.com/zoobz-io/aperture"
 	"github.com/zoobz-io/astql/postgres"
 	"github.com/zoobz-io/capitan"
-	"github.com/zoobz-io/pipz"
+	"github.com/zoobz-io/grub"
+	grubredis "github.com/zoobz-io/grub/redis"
 	"github.com/zoobz-io/sum"
 
 	"github.com/zoobz-io/cicero/api/contracts"
@@ -21,11 +23,9 @@ import (
 	"github.com/zoobz-io/cicero/api/wire"
 	"github.com/zoobz-io/cicero/config"
 	"github.com/zoobz-io/cicero/events"
-	extranslator "github.com/zoobz-io/cicero/external/translator"
 	intotel "github.com/zoobz-io/cicero/internal/otel"
-	"github.com/zoobz-io/cicero/internal/classify"
-	"github.com/zoobz-io/cicero/internal/translate"
 	"github.com/zoobz-io/cicero/models"
+	"github.com/zoobz-io/cicero/services"
 	"github.com/zoobz-io/cicero/stores"
 )
 
@@ -56,6 +56,9 @@ func run() error {
 	if err := sum.Config[config.Translator](ctx, k, nil); err != nil {
 		return fmt.Errorf("failed to load translator config: %w", err)
 	}
+	if err := sum.Config[config.Redis](ctx, k, nil); err != nil {
+		return fmt.Errorf("failed to load redis config: %w", err)
+	}
 
 	// =========================================================================
 	// 2. Connect to Infrastructure
@@ -70,22 +73,34 @@ func run() error {
 	log.Println("database connected")
 	capitan.Emit(ctx, events.StartupDatabaseConnected)
 
+	redisCfg := sum.MustUse[config.Redis](ctx)
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     redisCfg.Addr,
+		Password: redisCfg.Password,
+		DB:       redisCfg.DB,
+	})
+	defer func() { _ = redisClient.Close() }()
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("failed to connect to redis: %w", err)
+	}
+	log.Println("redis connected")
+
 	// =========================================================================
 	// 3. Create Stores
 	// =========================================================================
 
 	renderer := postgres.New()
-	allStores := stores.New(db, renderer)
+	redisProvider := grubredis.New(redisClient)
+	translationCache := grub.NewStore[models.Translation](redisProvider)
+	allStores := stores.New(db, renderer, translationCache)
 
 	// =========================================================================
 	// 4. Create Clients and Services
 	// =========================================================================
 
 	translatorCfg := sum.MustUse[config.Translator](ctx)
-	translatorClient := extranslator.NewClient(translatorCfg.Addr)
-	defer func() { _ = translatorClient.Close() }()
-
-	classifier := &classify.Simple{}
+	translateSvc := services.NewTranslateService(translatorCfg.Addr)
+	defer func() { _ = translateSvc.Close() }()
 
 	// =========================================================================
 	// 5. Register Contracts
@@ -93,12 +108,7 @@ func run() error {
 
 	sum.Register[contracts.Sources](k, allStores.Sources)
 	sum.Register[contracts.Translations](k, allStores.Translations)
-	sum.Register[contracts.Translator](k, translatorClient)
-	sum.Register[classify.Classifier](k, classifier)
-
-	// Register the translation pipeline so handlers can resolve it from context.
-	pipeline := translate.NewPipeline()
-	sum.Register[pipz.Chainable[*translate.Job]](k, pipeline)
+	sum.Register[contracts.Translator](k, translateSvc)
 
 	// =========================================================================
 	// 6. Register Boundaries

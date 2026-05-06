@@ -9,7 +9,7 @@ import (
 
 func TestTranslation_Clone(t *testing.T) {
 	original := Translation{
-		ID:         1,
+		ID:         "test-uuid-1",
 		SourceHash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
 		SourceLang: "en",
 		TargetLang: "es",
@@ -23,7 +23,7 @@ func TestTranslation_Clone(t *testing.T) {
 	clone := original.Clone()
 
 	if clone.ID != original.ID {
-		t.Errorf("ID: got %d, want %d", clone.ID, original.ID)
+		t.Errorf("ID: got %q, want %q", clone.ID, original.ID)
 	}
 	if clone.SourceHash != original.SourceHash {
 		t.Errorf("SourceHash: got %q, want %q", clone.SourceHash, original.SourceHash)

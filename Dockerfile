@@ -5,9 +5,6 @@ WORKDIR /build
 
 RUN apk add --no-cache git ca-certificates
 
-# Copy proto submodule (required by replace directive)
-COPY proto/ proto/
-
 # Copy module files and download dependencies
 COPY go.mod go.sum ./
 RUN go mod download

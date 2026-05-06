@@ -25,7 +25,7 @@ func NewSource(t *testing.T) *models.Source {
 func NewTranslation(t *testing.T) *models.Translation {
 	t.Helper()
 	return &models.Translation{
-		ID:         1,
+		ID:         "test-uuid-1",
 		SourceHash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
 		SourceLang: "en",
 		TargetLang: "es",

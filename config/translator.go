@@ -2,9 +2,9 @@ package config
 
 import "github.com/zoobz-io/check"
 
-// Translator holds configuration for the translator gRPC sidecar client.
+// Translator holds configuration for the LibreTranslate client.
 type Translator struct {
-	Addr string `env:"APP_TRANSLATOR_ADDR" default:"localhost:9091"`
+	Addr string `env:"APP_LIBRETRANSLATE_ADDR" default:"http://localhost:5000"`
 }
 
 // Validate checks that the translator configuration is valid.

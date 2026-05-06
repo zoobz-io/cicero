@@ -10,23 +10,6 @@ processors:
     send_batch_size: 1024
 
 exporters:
-  # Traces to Jaeger
-  otlp/jaeger:
-    endpoint: jaeger:4317
-    tls:
-      insecure: true
-
-  # Logs to Loki via OTLP
-  otlphttp/loki:
-    endpoint: http://loki:3100/otlp
-    tls:
-      insecure: true
-
-  # Metrics for Prometheus to scrape
-  prometheus:
-    endpoint: 0.0.0.0:8889
-
-  # Debug exporter for troubleshooting (remove in production)
   debug:
     verbosity: detailed
 
@@ -35,12 +18,12 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/jaeger]
+      exporters: [debug]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus]
+      exporters: [debug]
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/loki, debug]
+      exporters: [debug]

@@ -2,10 +2,20 @@
 package models
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"github.com/zoobz-io/check"
 )
+
+// HashText computes the SHA-256 content hash of text,
+// truncated to 32 hex characters. This is the content-addressable
+// key used for deduplication and retrieval.
+func HashText(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])[:32]
+}
 
 // Source represents content-addressable source text.
 // The Hash field is derived from the source text and serves as the primary key,

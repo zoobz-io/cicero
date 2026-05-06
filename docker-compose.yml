@@ -19,6 +19,16 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   migrate:
     image: ghcr.io/kukymbr/goose-docker:latest
     depends_on:
@@ -32,7 +42,7 @@ services:
       GOOSE_MIGRATION_DIR: /migrations
 
   # =============================================================================
-  # Translation Sidecar
+  # Translation
   # =============================================================================
 
   libretranslate:
@@ -44,86 +54,21 @@ services:
       - "5000:5000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/languages"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  translator:
-    build:
-      context: .
-      dockerfile: services/translator/Dockerfile
-    depends_on:
-      libretranslate:
-        condition: service_healthy
-    environment:
-      TRANSLATOR_LISTEN_ADDR: ":9091"
-      LIBRETRANSLATE_ADDR: "http://libretranslate:5000"
-    ports:
-      - "9091:9091"
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 9091 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
 
   # =============================================================================
-  # Observability Stack
+  # Observability
   # =============================================================================
 
-  # Traces - Jaeger
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
-    ports:
-      - "16686:16686"  # UI
-
-  # Logs - Loki
-  loki:
-    image: grafana/loki:latest
-    command: -config.file=/etc/loki/local-config.yaml
-    ports:
-      - "3100:3100"
-    volumes:
-      - lokidata:/loki
-
-  # Metrics - Prometheus
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./tools/dev/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
-      - prometheusdata:/prometheus
-    ports:
-      - "9090:9090"
-
-  # OTEL Collector - Central hub
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     volumes:
       - ./tools/dev/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
-      - "4318:4318"    # OTLP HTTP
-    depends_on:
-      - jaeger
-      - loki
-      - prometheus
-
-  # Grafana - Unified dashboard
-  grafana:
-    image: grafana/grafana:latest
-    environment:
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
-      GF_AUTH_DISABLE_LOGIN_FORM: "true"
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafanadata:/var/lib/grafana
-      - ./tools/dev/grafana/provisioning:/etc/grafana/provisioning:ro
-    depends_on:
-      - prometheus
-      - loki
-      - jaeger
+      - "4318:4318"
 
   # =============================================================================
   # Application
@@ -136,9 +81,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
-      translator:
+      libretranslate:
         condition: service_healthy
     environment:
       APP_PORT: "8080"
@@ -148,7 +95,8 @@ services:
       APP_DB_USER: cicero
       APP_DB_PASSWORD: cicero
       APP_DB_SSLMODE: disable
-      APP_TRANSLATOR_ADDR: translator:9091
+      APP_REDIS_ADDR: "redis:6379"
+      APP_LIBRETRANSLATE_ADDR: "http://libretranslate:5000"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: cicero
     ports:
@@ -158,6 +106,3 @@ services:
 
 volumes:
   pgdata:
-  lokidata:
-  prometheusdata:
-  grafanadata:

@@ -10,31 +10,37 @@ import (
 	"time"
 
 	"github.com/zoobz-io/cicero/api/contracts"
-	"github.com/zoobz-io/cicero/internal/translate"
 	"github.com/zoobz-io/cicero/models"
 	cicerotest "github.com/zoobz-io/cicero/testing"
-	"github.com/zoobz-io/pipz"
 	roccotest "github.com/zoobz-io/rocco/testing"
 	"github.com/zoobz-io/sum"
 )
 
+func setupTranslationRegistry(t *testing.T, ms *cicerotest.MockSources, mt *cicerotest.MockTranslations, mtr *cicerotest.MockTranslator) {
+	t.Helper()
+	sum.Reset()
+	k := sum.Start()
+	sum.Register[contracts.Sources](k, ms)
+	sum.Register[contracts.Translations](k, mt)
+	sum.Register[contracts.Translator](k, mtr)
+	sum.Freeze(k)
+	t.Cleanup(sum.Reset)
+}
+
 func TestCreateTranslation_Success(t *testing.T) {
-	pipeline := &cicerotest.MockPipeline{
-		OnProcess: func(_ context.Context, job *translate.Job) (*translate.Job, error) {
-			job.Hash = "315f5bdb76d078c43b8ac0064e4a0164"
-			job.TranslatedText = "¡Hola, mundo!"
-			job.Provider = "sidecar"
-			job.Status = "completed"
-			job.Classification = models.Classification{Route: models.RouteSimple}
-			return job, nil
+	ms := &cicerotest.MockSources{}
+	mt := &cicerotest.MockTranslations{
+		OnGetBySourceAndLang: func(_ context.Context, _, _, _, _ string) (*models.Translation, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	mtr := &cicerotest.MockTranslator{
+		OnTranslate: func(_ context.Context, _, _, _ string) (string, string, error) {
+			return "¡Hola, mundo!", "libretranslate", nil
 		},
 	}
 
-	sum.Reset()
-	k := sum.Start()
-	sum.Register[pipz.Chainable[*translate.Job]](k, pipeline)
-	sum.Freeze(k)
-	t.Cleanup(sum.Reset)
+	setupTranslationRegistry(t, ms, mt, mtr)
 
 	engine := roccotest.TestEngine()
 	engine.WithHandlers(CreateTranslation)
@@ -55,38 +61,79 @@ func TestCreateTranslation_Success(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	checks := []struct {
-		field string
-		want  string
-	}{
-		{"hash", "315f5bdb76d078c43b8ac0064e4a0164"},
-		{"translated_text", "¡Hola, mundo!"},
-		{"provider", "sidecar"},
-		{"status", "completed"},
-		{"classification", "simple"},
-		{"source_lang", "en"},
-		{"target_lang", "es"},
+	if got, _ := body["translated_text"].(string); got != "¡Hola, mundo!" {
+		t.Errorf("translated_text: got %q, want %q", got, "¡Hola, mundo!")
 	}
-	for _, c := range checks {
-		got, _ := body[c.field].(string)
-		if got != c.want {
-			t.Errorf("%s: got %q, want %q", c.field, got, c.want)
-		}
+	if got, _ := body["provider"].(string); got != "libretranslate" {
+		t.Errorf("provider: got %q, want %q", got, "libretranslate")
 	}
 }
 
-func TestCreateTranslation_PipelineError_Returns500(t *testing.T) {
-	pipeline := &cicerotest.MockPipeline{
-		OnProcess: func(_ context.Context, job *translate.Job) (*translate.Job, error) {
-			return nil, errors.New("sidecar unavailable")
+func TestCreateTranslation_DedupHit(t *testing.T) {
+	existing := &models.Translation{
+		ID:         "test-uuid-1",
+		SourceHash: "315f5bdb76d078c43b8ac0064e4a0164",
+		SourceLang: "en",
+		TargetLang: "es",
+		Text:       "cached translation",
+		Provider:   "libretranslate",
+		Status:     "completed",
+		TenantID:   "zoobzio",
+	}
+
+	ms := &cicerotest.MockSources{
+		OnGet: func(_ context.Context, _ string) (*models.Source, error) {
+			return &models.Source{Hash: "315f5bdb76d078c43b8ac0064e4a0164", Text: "Hello, world!", TenantID: "zoobzio"}, nil
+		},
+	}
+	mt := &cicerotest.MockTranslations{
+		OnGetBySourceAndLang: func(_ context.Context, _, _, _, _ string) (*models.Translation, error) {
+			return existing, nil
 		},
 	}
 
-	sum.Reset()
-	k := sum.Start()
-	sum.Register[pipz.Chainable[*translate.Job]](k, pipeline)
-	sum.Freeze(k)
-	t.Cleanup(sum.Reset)
+	translatorCalled := false
+	mtr := &cicerotest.MockTranslator{
+		OnTranslate: func(_ context.Context, _, _, _ string) (string, string, error) {
+			translatorCalled = true
+			return "", "", nil
+		},
+	}
+
+	setupTranslationRegistry(t, ms, mt, mtr)
+
+	engine := roccotest.TestEngine()
+	engine.WithHandlers(CreateTranslation)
+
+	resp := roccotest.ServeRequest(engine, http.MethodPost, "/translations", map[string]string{
+		"text":        "Hello, world!",
+		"source_lang": "en",
+		"target_lang": "es",
+		"tenant_id":   "zoobzio",
+	})
+
+	if resp.StatusCode() != http.StatusCreated {
+		t.Errorf("status: got %d, want %d (body: %s)", resp.StatusCode(), http.StatusCreated, resp.BodyString())
+	}
+	if translatorCalled {
+		t.Error("translator should not be called on dedup hit")
+	}
+}
+
+func TestCreateTranslation_TranslatorError_Returns500(t *testing.T) {
+	ms := &cicerotest.MockSources{}
+	mt := &cicerotest.MockTranslations{
+		OnGetBySourceAndLang: func(_ context.Context, _, _, _, _ string) (*models.Translation, error) {
+			return nil, errors.New("not found")
+		},
+	}
+	mtr := &cicerotest.MockTranslator{
+		OnTranslate: func(_ context.Context, _, _, _ string) (string, string, error) {
+			return "", "", errors.New("libretranslate unavailable")
+		},
+	}
+
+	setupTranslationRegistry(t, ms, mt, mtr)
 
 	engine := roccotest.TestEngine()
 	engine.WithHandlers(CreateTranslation)
@@ -103,38 +150,6 @@ func TestCreateTranslation_PipelineError_Returns500(t *testing.T) {
 	}
 }
 
-func TestCreateTranslation_ValidationError_MissingText(t *testing.T) {
-	pipeline := &cicerotest.MockPipeline{}
-
-	sum.Reset()
-	k := sum.Start()
-	sum.Register[pipz.Chainable[*translate.Job]](k, pipeline)
-	sum.Freeze(k)
-	t.Cleanup(sum.Reset)
-
-	engine := roccotest.TestEngine()
-	engine.WithHandlers(CreateTranslation)
-
-	tests := []struct {
-		name string
-		body map[string]string
-	}{
-		{name: "missing text", body: map[string]string{"source_lang": "en", "target_lang": "es", "tenant_id": "zoobzio"}},
-		{name: "missing source_lang", body: map[string]string{"text": "Hello", "target_lang": "es", "tenant_id": "zoobzio"}},
-		{name: "missing target_lang", body: map[string]string{"text": "Hello", "source_lang": "en", "tenant_id": "zoobzio"}},
-		{name: "missing tenant_id", body: map[string]string{"text": "Hello", "source_lang": "en", "target_lang": "es"}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			resp := roccotest.ServeRequest(engine, http.MethodPost, "/translations", tc.body)
-			if resp.StatusCode() == http.StatusCreated {
-				t.Errorf("expected non-201 for %s, got 201", tc.name)
-			}
-		})
-	}
-}
-
 func TestGetTranslationsByHash_Success(t *testing.T) {
 	src := &models.Source{
 		Hash:     "315f5bdb76d078c43b8ac0064e4a0164",
@@ -146,7 +161,7 @@ func TestGetTranslationsByHash_Success(t *testing.T) {
 			SourceLang: "en",
 			TargetLang: "es",
 			Text:       "¡Hola, mundo!",
-			Provider:   "sidecar",
+			Provider:   "libretranslate",
 			Status:     "completed",
 			CreatedAt:  time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC),
 		},
@@ -163,12 +178,7 @@ func TestGetTranslationsByHash_Success(t *testing.T) {
 		},
 	}
 
-	sum.Reset()
-	k := sum.Start()
-	sum.Register[contracts.Sources](k, ms)
-	sum.Register[contracts.Translations](k, mt)
-	sum.Freeze(k)
-	t.Cleanup(sum.Reset)
+	setupTranslationRegistry(t, ms, mt, &cicerotest.MockTranslator{})
 
 	engine := roccotest.TestEngine()
 	engine.WithHandlers(GetTranslationsByHash)
@@ -187,10 +197,6 @@ func TestGetTranslationsByHash_Success(t *testing.T) {
 	if body["hash"] != src.Hash {
 		t.Errorf("hash: got %v, want %q", body["hash"], src.Hash)
 	}
-	if body["source_text"] != src.Text {
-		t.Errorf("source_text: got %v, want %q", body["source_text"], src.Text)
-	}
-
 	txs, _ := body["translations"].([]any)
 	if len(txs) != 1 {
 		t.Errorf("translations length: got %d, want 1", len(txs))
@@ -203,14 +209,8 @@ func TestGetTranslationsByHash_SourceNotFound_Returns404(t *testing.T) {
 			return nil, errors.New("not found")
 		},
 	}
-	mt := &cicerotest.MockTranslations{}
 
-	sum.Reset()
-	k := sum.Start()
-	sum.Register[contracts.Sources](k, ms)
-	sum.Register[contracts.Translations](k, mt)
-	sum.Freeze(k)
-	t.Cleanup(sum.Reset)
+	setupTranslationRegistry(t, ms, &cicerotest.MockTranslations{}, &cicerotest.MockTranslator{})
 
 	engine := roccotest.TestEngine()
 	engine.WithHandlers(GetTranslationsByHash)

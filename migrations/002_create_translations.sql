@@ -1,6 +1,6 @@
 -- +goose Up
 CREATE TABLE translations (
-    id BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     source_hash TEXT NOT NULL REFERENCES sources(hash),
     source_lang TEXT NOT NULL,
     target_lang TEXT NOT NULL,
