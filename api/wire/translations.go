@@ -8,7 +8,6 @@ type TranslateRequest struct {
 	Text       string `json:"text" description:"Source text to translate" example:"Hello, world!"`
 	SourceLang string `json:"source_lang" description:"Source language code" example:"en"`
 	TargetLang string `json:"target_lang" description:"Target language code" example:"es"`
-	TenantID   string `json:"tenant_id" description:"Tenant identifier" example:"zoobzio"`
 }
 
 // Validate validates the translation request.
@@ -17,7 +16,6 @@ func (r TranslateRequest) Validate() error {
 		check.Str(r.Text, "text").Required().V(),
 		check.Str(r.SourceLang, "source_lang").Required().V(),
 		check.Str(r.TargetLang, "target_lang").Required().V(),
-		check.Str(r.TenantID, "tenant_id").Required().V(),
 		check.NotEqual(r.SourceLang, r.TargetLang, "target_lang"),
 	).Err()
 }
@@ -83,7 +81,6 @@ type BatchTranslateRequest struct {
 	Texts      []string `json:"texts" description:"Source texts to translate"`
 	SourceLang string   `json:"source_lang" description:"Source language code" example:"en"`
 	TargetLang string   `json:"target_lang" description:"Target language code" example:"es"`
-	TenantID   string   `json:"tenant_id" description:"Tenant identifier" example:"zoobzio"`
 }
 
 // Validate validates the batch request.
@@ -92,7 +89,6 @@ func (r BatchTranslateRequest) Validate() error {
 		check.NotEmpty(r.Texts, "texts"),
 		check.Str(r.SourceLang, "source_lang").Required().V(),
 		check.Str(r.TargetLang, "target_lang").Required().V(),
-		check.Str(r.TenantID, "tenant_id").Required().V(),
 		check.NotEqual(r.SourceLang, r.TargetLang, "target_lang"),
 	).Err()
 }

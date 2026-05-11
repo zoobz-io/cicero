@@ -6,6 +6,7 @@ import (
 	"github.com/zoobz-io/cicero/api/contracts"
 	"github.com/zoobz-io/cicero/api/transformers"
 	"github.com/zoobz-io/cicero/api/wire"
+	"github.com/zoobz-io/cicero/internal/auth"
 	"github.com/zoobz-io/rocco"
 	"github.com/zoobz-io/sum"
 )
@@ -13,6 +14,9 @@ import (
 // ListTenantTranslations lists all translations for a tenant with pagination.
 var ListTenantTranslations = rocco.GET("/tenants/{tenant}/translations", func(req *rocco.Request[rocco.NoBody]) (wire.ListTranslationsResponse, error) {
 	tenant := req.Params.Path["tenant"]
+	if err := auth.RequireTenantAccess(req.Identity, tenant); err != nil {
+		return wire.ListTranslationsResponse{}, ErrForbidden.WithCause(err)
+	}
 
 	limit, _ := strconv.Atoi(req.Params.Query["limit"])
 	offset, _ := strconv.Atoi(req.Params.Query["offset"])
@@ -27,15 +31,21 @@ var ListTenantTranslations = rocco.GET("/tenants/{tenant}/translations", func(re
 	}
 
 	return transformers.TranslationsToList(list, total, limit, offset), nil
-}).WithPathParams("tenant").
+}).WithAuthentication().
+	WithPathParams("tenant").
 	WithQueryParams("limit", "offset").
 	WithSummary("List tenant translations").
 	WithDescription("Lists all translations for a tenant with pagination.").
-	WithTags("Tenants")
+	WithTags("Tenants").
+	WithErrors(ErrForbidden)
 
 // GetTenantTranslationsByHash retrieves all translations for a hash within a tenant.
 var GetTenantTranslationsByHash = rocco.GET("/tenants/{tenant}/translations/{hash}", func(req *rocco.Request[rocco.NoBody]) (wire.TenantTranslationsResponse, error) {
 	tenant := req.Params.Path["tenant"]
+	if err := auth.RequireTenantAccess(req.Identity, tenant); err != nil {
+		return wire.TenantTranslationsResponse{}, ErrForbidden.WithCause(err)
+	}
+
 	hash := req.Params.Path["hash"]
 
 	sources := sum.MustUse[contracts.Sources](req.Context)
@@ -51,15 +61,20 @@ var GetTenantTranslationsByHash = rocco.GET("/tenants/{tenant}/translations/{has
 	}
 
 	return transformers.TenantTranslationsToResponse(src, list, tenant), nil
-}).WithPathParams("tenant", "hash").
+}).WithAuthentication().
+	WithPathParams("tenant", "hash").
 	WithSummary("Get tenant translations by hash").
 	WithDescription("Retrieves all translations for a content hash within a tenant.").
 	WithTags("Tenants").
-	WithErrors(ErrSourceNotFound)
+	WithErrors(ErrSourceNotFound, ErrForbidden)
 
 // UpdateTranslation edits a translation's text by ID within a tenant.
 var UpdateTranslation = rocco.PUT("/tenants/{tenant}/translations/{id}", func(req *rocco.Request[wire.UpdateTranslationRequest]) (wire.TranslationDetail, error) {
 	tenant := req.Params.Path["tenant"]
+	if err := auth.RequireTenantAccess(req.Identity, tenant); err != nil {
+		return wire.TranslationDetail{}, ErrForbidden.WithCause(err)
+	}
+
 	id := req.Params.Path["id"]
 
 	translations := sum.MustUse[contracts.Translations](req.Context)
@@ -69,15 +84,20 @@ var UpdateTranslation = rocco.PUT("/tenants/{tenant}/translations/{id}", func(re
 	}
 
 	return transformers.TranslationToDetail(updated), nil
-}).WithPathParams("tenant", "id").
+}).WithAuthentication().
+	WithPathParams("tenant", "id").
 	WithSummary("Update translation").
 	WithDescription("Edits a translation's text by ID within a tenant. Invalidates the cache.").
 	WithTags("Tenants").
-	WithErrors(ErrTranslationNotFound)
+	WithErrors(ErrTranslationNotFound, ErrForbidden)
 
 // DeleteTranslation removes a translation by ID within a tenant.
 var DeleteTranslation = rocco.DELETE("/tenants/{tenant}/translations/{id}", func(req *rocco.Request[rocco.NoBody]) (rocco.NoBody, error) {
 	tenant := req.Params.Path["tenant"]
+	if err := auth.RequireTenantAccess(req.Identity, tenant); err != nil {
+		return rocco.NoBody{}, ErrForbidden.WithCause(err)
+	}
+
 	id := req.Params.Path["id"]
 
 	translations := sum.MustUse[contracts.Translations](req.Context)
@@ -86,16 +106,21 @@ var DeleteTranslation = rocco.DELETE("/tenants/{tenant}/translations/{id}", func
 	}
 
 	return rocco.NoBody{}, nil
-}).WithPathParams("tenant", "id").
+}).WithAuthentication().
+	WithPathParams("tenant", "id").
 	WithSummary("Delete translation").
-	WithDescription("Deletes a translation by ID within a tenant. Reverts to machine translation on next request.").
+	WithDescription("Deletes a translation by ID within a tenant.").
 	WithTags("Tenants").
-	WithErrors(ErrTranslationNotFound).
+	WithErrors(ErrTranslationNotFound, ErrForbidden).
 	WithSuccessStatus(204)
 
 // GetCoverage returns translation coverage for a tenant and target language.
 var GetCoverage = rocco.GET("/tenants/{tenant}/coverage", func(req *rocco.Request[rocco.NoBody]) (wire.CoverageResponse, error) {
 	tenant := req.Params.Path["tenant"]
+	if err := auth.RequireTenantAccess(req.Identity, tenant); err != nil {
+		return wire.CoverageResponse{}, ErrForbidden.WithCause(err)
+	}
+
 	targetLang := req.Params.Query["target_lang"]
 
 	sources := sum.MustUse[contracts.Sources](req.Context)
@@ -105,18 +130,13 @@ var GetCoverage = rocco.GET("/tenants/{tenant}/coverage", func(req *rocco.Reques
 	}
 
 	translations := sum.MustUse[contracts.Translations](req.Context)
-	list, err := translations.ListByTenantAndHash(req.Context, tenant, "")
+	allTrans, _, err := translations.ListByTenant(req.Context, tenant, 0, 0)
 	if err != nil {
-		// Fall back to listing all tenant translations
-		allTrans, _, listErr := translations.ListByTenant(req.Context, tenant, 0, 0)
-		if listErr != nil {
-			return wire.CoverageResponse{}, listErr
-		}
-		list = allTrans
+		return wire.CoverageResponse{}, err
 	}
 
 	translated := 0
-	for _, t := range list {
+	for _, t := range allTrans {
 		if targetLang == "" || t.TargetLang == targetLang {
 			translated++
 		}
@@ -134,8 +154,10 @@ var GetCoverage = rocco.GET("/tenants/{tenant}/coverage", func(req *rocco.Reques
 		Translated: translated,
 		Percentage: pct,
 	}, nil
-}).WithPathParams("tenant").
+}).WithAuthentication().
+	WithPathParams("tenant").
 	WithQueryParams("target_lang").
 	WithSummary("Translation coverage").
 	WithDescription("Returns translation coverage percentage for a tenant and optional target language.").
-	WithTags("Tenants")
+	WithTags("Tenants").
+	WithErrors(ErrForbidden)

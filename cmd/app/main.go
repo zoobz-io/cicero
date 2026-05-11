@@ -11,6 +11,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
+	"github.com/zoobz-io/aegis"
+	sessionpb "github.com/zoobz-io/aegis/proto/session/v1"
 	"github.com/zoobz-io/aperture"
 	"github.com/zoobz-io/astql/postgres"
 	"github.com/zoobz-io/capitan"
@@ -23,6 +25,7 @@ import (
 	"github.com/zoobz-io/cicero/api/wire"
 	"github.com/zoobz-io/cicero/config"
 	"github.com/zoobz-io/cicero/events"
+	"github.com/zoobz-io/cicero/internal/auth"
 	intotel "github.com/zoobz-io/cicero/internal/otel"
 	"github.com/zoobz-io/cicero/models"
 	"github.com/zoobz-io/cicero/services"
@@ -58,6 +61,9 @@ func run() error {
 	}
 	if err := sum.Config[config.Redis](ctx, k, nil); err != nil {
 		return fmt.Errorf("failed to load redis config: %w", err)
+	}
+	if err := sum.Config[config.Mesh](ctx, k, nil); err != nil {
+		return fmt.Errorf("failed to load mesh config: %w", err)
 	}
 
 	// =========================================================================
@@ -165,7 +171,45 @@ func run() error {
 	capitan.Emit(ctx, events.StartupApertureReady)
 
 	// =========================================================================
-	// 9. Register Handlers and Run
+	// 9. Aegis Mesh Node
+	// =========================================================================
+
+	meshCfg := sum.MustUse[config.Mesh](ctx)
+
+	keychain := aegis.NewFileKeychain(meshCfg.CertDir)
+	admin, err := aegis.NewAdminFromKeychain(ctx, keychain, meshCfg.ID)
+	if err != nil {
+		return fmt.Errorf("failed to create mesh admin: %w", err)
+	}
+
+	node, err := aegis.NewNodeBuilder().
+		WithID(meshCfg.ID).
+		WithName(meshCfg.Name).
+		WithAddress(meshCfg.Addr()).
+		WithCertDir(meshCfg.CertDir).
+		WithAdmin(admin).
+		Build()
+	if err != nil {
+		return fmt.Errorf("failed to build mesh node: %w", err)
+	}
+
+	if err := node.StartServer(); err != nil {
+		return fmt.Errorf("failed to start mesh server: %w", err)
+	}
+	defer func() { _ = node.Shutdown() }()
+	log.Println("mesh node started")
+
+	// =========================================================================
+	// 10. Authentication via Janus
+	// =========================================================================
+
+	pool := aegis.NewServiceClientPool(node)
+	sessionClient := aegis.NewServiceClient(pool, "session", "v1", sessionpb.NewSessionServiceClient)
+	svc.Engine().WithAuthenticator(auth.NewAuthenticator(sessionClient))
+	log.Println("authenticator configured")
+
+	// =========================================================================
+	// 11. Register Handlers and Run
 	// =========================================================================
 
 	svc.Handle(handlers.All()...)

@@ -6,6 +6,7 @@ toolchain go1.25.3
 
 require (
 	github.com/redis/go-redis/v9 v9.19.0
+	github.com/zoobz-io/aegis v0.0.7
 	github.com/zoobz-io/aperture v1.0.3
 	github.com/zoobz-io/capitan v1.0.2
 	github.com/zoobz-io/grub/redis v1.0.18
@@ -26,6 +27,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/testcontainers/testcontainers-go v0.42.0 // indirect
 	github.com/zoobz-io/lucene v0.0.4 // indirect
+	github.com/zoobz-io/sctx v1.0.3 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	google.golang.org/grpc v1.75.0 // indirect
 )
